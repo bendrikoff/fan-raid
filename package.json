@@ -1,0 +1,21 @@
+{
+  "name": "fan-raid",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fan Raid is a multiplayer second-screen game for football matches",
+  "packageManager": "pnpm@10.34.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream run dev",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "txline:activate": "pnpm --dir apps/server run txline:activate",
+    "txline:check": "pnpm --dir apps/server run txline:check"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

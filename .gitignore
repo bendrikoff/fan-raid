@@ -1,0 +1,19 @@
+node_modules/
+.pnpm-store/
+.codex/
+.claude/
+.agents/
+.impeccable/
+dist/
+*.log
+.env
+solana-keypair.json
+apps/server/uploads/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+# Записи фида (реплеи) генерируются под cwd сервера — apps/server/recordings.
+apps/server/recordings/*.jsonl
+!apps/server/recordings/demo.jsonl
+.DS_Store

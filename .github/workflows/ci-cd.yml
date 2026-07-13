@@ -1,0 +1,112 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fan-raid-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Test and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test backend
+        run: pnpm --filter @fan-raid/server run test
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Prepare CI env for Docker Compose
+        run: |
+          cat > .env <<'ENV'
+          FEED_SOURCE=sim
+          DEV_MODE=true
+          SERVER_PORT=8080
+          SESSION_SECRET=ci-secret
+          SOLANA_ENABLED=false
+          TXODDS_API_KEY=
+          ENV
+
+      - name: Build Docker images
+        run: docker compose build
+
+  deploy:
+    name: Deploy to server
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.event_name == 'push'
+
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/fan-raids' }}
+      DEPLOY_BRANCH: ${{ github.ref_name }}
+
+    steps:
+      - name: Validate deploy secrets
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          test -n "$DEPLOY_HOST" || (echo "DEPLOY_HOST secret is missing" && exit 1)
+          test -n "$DEPLOY_USER" || (echo "DEPLOY_USER secret is missing" && exit 1)
+          test -n "$DEPLOY_SSH_KEY" || (echo "DEPLOY_SSH_KEY secret is missing" && exit 1)
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy over SSH
+        run: |
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "APP_DIR='$DEPLOY_PATH' BRANCH='$DEPLOY_BRANCH' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          if [ ! -d "$APP_DIR/.git" ]; then
+            echo "Repository is not cloned at $APP_DIR"
+            echo "Clone it once on the server and create $APP_DIR/.env before running deploy."
+            exit 1
+          fi
+
+          cd "$APP_DIR"
+          git fetch --prune origin
+          git checkout "$BRANCH"
+          git reset --hard "origin/$BRANCH"
+          chmod +x scripts/deploy-on-server.sh
+          ./scripts/deploy-on-server.sh
+          REMOTE
