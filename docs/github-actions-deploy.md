@@ -89,7 +89,42 @@ nano /opt/fan-raids/.env
 
 Future deploys preserve `/opt/fan-raids/.env`.
 
-By default, only the web container publishes a host port. The backend stays internal on Docker network port `8080` and is reached by the web nginx proxy through `/api`, `/uploads`, and `/ws`.
+By default, only the Caddy container publishes host ports `80` and `443`. The web and backend containers stay internal on the Docker network. The backend is reached by the web nginx proxy through `/api`, `/uploads`, and `/ws`.
+
+## HTTPS Setup
+
+Wallet login requires HTTPS on production domains. Use a real domain, not a raw server IP.
+
+1. Create a DNS A record that points your domain to the VPS IP.
+2. Open HTTP and HTTPS ports on the server:
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+3. Edit the server environment file:
+
+```bash
+nano /opt/fan-raids/.env
+```
+
+4. Set:
+
+```env
+APP_DOMAIN=fanraid.example.com
+```
+
+5. Push to `main` or run deploy again. Caddy will request and renew the certificate automatically.
+
+Check HTTPS logs with:
+
+```bash
+cd /opt/fan-raids
+docker compose logs -f caddy
+```
+
+Open the app as `https://fanraid.example.com`, not `http://SERVER_IP:5173`.
 
 ## Password Login
 

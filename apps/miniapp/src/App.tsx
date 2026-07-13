@@ -654,6 +654,7 @@ function shortWallet(walletAddress: string): string {
 
 function walletErrorText(err: unknown): string {
   const message = err instanceof Error ? err.message : '';
+  if (message === 'wallet_requires_https') return 'Wallet login requires HTTPS. Open the site through your HTTPS domain.';
   if (message === 'wallet_not_found') return 'Wallet not found. Install Phantom/Solflare or use dev sign-in.';
   if (message === 'wallet_sign_not_supported') return 'Wallet does not support message signing.';
   if (message.includes('/api/auth/wallet/verify')) return 'Wallet signature verification failed.';
@@ -662,6 +663,7 @@ function walletErrorText(err: unknown): string {
 
 function topupErrorText(err: unknown): string {
   const message = err instanceof Error ? err.message : '';
+  if (message === 'wallet_requires_https') return 'Wallet payments require HTTPS. Open the site through your HTTPS domain.';
   if (message === 'wallet_not_found') return 'Wallet not found.';
   if (message === 'wallet_devnet_balance_insufficient') return 'Not enough SOL in the devnet wallet.';
   if (message === 'wallet_transaction_not_supported') return 'Wallet cannot send transactions.';

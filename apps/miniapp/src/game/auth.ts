@@ -56,6 +56,12 @@ function walletProvider(): SolanaWalletProvider | null {
   return w.phantom?.solana ?? w.solana ?? null;
 }
 
+function requiresHttpsForWallet(): boolean {
+  const host = window.location.hostname;
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  return window.location.protocol !== 'https:' && !isLocal;
+}
+
 export function hasWalletProvider(): boolean {
   return Boolean(walletProvider()?.connect);
 }
@@ -137,6 +143,7 @@ export async function authDev(name: string): Promise<Session> {
 
 export async function authWallet(): Promise<Session> {
   const provider = walletProvider();
+  if (!provider && requiresHttpsForWallet()) throw new Error('wallet_requires_https');
   if (!provider) throw new Error('wallet_not_found');
   if (!provider.signMessage) throw new Error('wallet_sign_not_supported');
 
@@ -265,6 +272,7 @@ async function sendSolTransfer(args: {
   lamports: number;
 }): Promise<string> {
   const provider = walletProvider();
+  if (!provider && requiresHttpsForWallet()) throw new Error('wallet_requires_https');
   if (!provider) throw new Error('wallet_not_found');
 
   const connected = await provider.connect();
