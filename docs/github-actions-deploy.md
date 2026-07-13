@@ -63,6 +63,8 @@ The deploy script supports both Compose variants:
 - `docker compose`
 - `docker-compose`
 
+If neither is installed, the deploy script tries to install Docker Compose v2 into the deploy user's `~/.docker/cli-plugins/docker-compose` using `curl` or `wget`.
+
 Create a deploy user and allow it to run Docker:
 
 ```bash
