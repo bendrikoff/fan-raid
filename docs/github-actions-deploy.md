@@ -45,7 +45,7 @@ Optional:
 
 ## One-Time Server Setup
 
-Install Docker and the Docker Compose plugin on the server.
+Install Docker and Docker Compose on the server.
 
 ```bash
 sudo apt update
@@ -57,6 +57,11 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 ```
+
+The deploy script supports both Compose variants:
+
+- `docker compose`
+- `docker-compose`
 
 Create a deploy user and allow it to run Docker:
 

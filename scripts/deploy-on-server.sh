@@ -6,6 +6,16 @@ COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 
 cd "$APP_DIR"
 
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE=(docker-compose)
+else
+  echo "Docker Compose is not installed."
+  echo "Install either the Docker Compose plugin ('docker compose') or legacy docker-compose."
+  exit 1
+fi
+
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "Missing $COMPOSE_FILE in $APP_DIR"
   exit 1
@@ -17,8 +27,8 @@ if [ ! -f ".env" ]; then
   exit 1
 fi
 
-docker compose -f "$COMPOSE_FILE" config --quiet
-docker compose -f "$COMPOSE_FILE" build
-docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
-docker compose -f "$COMPOSE_FILE" ps
+"${COMPOSE[@]}" -f "$COMPOSE_FILE" config --quiet
+"${COMPOSE[@]}" -f "$COMPOSE_FILE" build
+"${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d --remove-orphans
+"${COMPOSE[@]}" -f "$COMPOSE_FILE" ps
 docker image prune -f
