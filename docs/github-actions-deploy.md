@@ -89,6 +89,8 @@ nano /opt/fan-raids/.env
 
 Future deploys preserve `/opt/fan-raids/.env`.
 
+By default, only the web container publishes a host port. The backend stays internal on Docker network port `8080` and is reached by the web nginx proxy through `/api`, `/uploads`, and `/ws`.
+
 ## Password Login
 
 If your server uses password SSH login, add `DEPLOY_PASSWORD` as a GitHub Actions secret.

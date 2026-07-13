@@ -9,7 +9,7 @@ docker compose up --build
 Open:
 
 - Frontend: http://localhost:5173
-- Backend health: http://localhost:8080/api/health
+- Backend health through web proxy: http://localhost:5173/api/health
 
 `docker-compose.yml` reads the local `.env` file. If you want to run without TxODDS, keep:
 

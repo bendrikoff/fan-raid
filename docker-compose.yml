@@ -15,8 +15,8 @@ services:
       SOLANA_KEYPAIR_PATH: /data/solana-keypair.json
     volumes:
       - fan_raid_server_data:/data
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
