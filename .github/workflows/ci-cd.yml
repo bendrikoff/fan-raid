@@ -112,6 +112,8 @@ jobs:
             SCP_CMD=(sshpass -e scp -P "$DEPLOY_PORT")
           fi
 
+          RELEASE_ARCHIVE="$RUNNER_TEMP/fan-raid-release.tgz"
+
           tar \
             --exclude='.git' \
             --exclude='.env' \
@@ -122,9 +124,9 @@ jobs:
             --exclude='*.log' \
             --exclude='*.sqlite' \
             --exclude='*.sqlite-*' \
-            -czf fan-raid-release.tgz .
+            -czf "$RELEASE_ARCHIVE" .
 
-          "${SCP_CMD[@]}" fan-raid-release.tgz "$SSH_TARGET:/tmp/fan-raid-release.tgz"
+          "${SCP_CMD[@]}" "$RELEASE_ARCHIVE" "$SSH_TARGET:/tmp/fan-raid-release.tgz"
 
           "${SSH_CMD[@]}" "$SSH_TARGET" "APP_DIR='$DEPLOY_PATH' bash -s" <<'REMOTE'
           set -euo pipefail
