@@ -29,7 +29,13 @@ Required:
 
 - `DEPLOY_HOST` - server IP or hostname
 - `DEPLOY_USER` - SSH user, for example `deploy`
+- `DEPLOY_PASSWORD` - SSH password for `DEPLOY_USER`
+
+Alternative to password:
+
 - `DEPLOY_SSH_KEY` - private SSH key allowed to connect to the server
+
+If both `DEPLOY_SSH_KEY` and `DEPLOY_PASSWORD` are set, the workflow uses the SSH key.
 
 Optional:
 
@@ -74,9 +80,13 @@ If the repository is private, add an SSH deploy key for the server in GitHub:
 
 `Settings` → `Deploy keys` → `Add deploy key`
 
-## SSH Key For GitHub Actions
+## Password Login
 
-Generate a separate key on your local machine:
+If your server uses password SSH login, add `DEPLOY_PASSWORD` as a GitHub Actions secret.
+
+The workflow installs `sshpass` in the GitHub runner and deploys with that password.
+
+## SSH Key For GitHub Actions
 
 ```bash
 ssh-keygen -t ed25519 -C "fan-raids-github-actions" -f fan-raids-actions

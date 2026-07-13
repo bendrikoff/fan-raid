@@ -72,29 +72,44 @@ jobs:
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/fan-raids' }}
       DEPLOY_BRANCH: ${{ github.ref_name }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
 
     steps:
       - name: Validate deploy secrets
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           test -n "$DEPLOY_HOST" || (echo "DEPLOY_HOST secret is missing" && exit 1)
           test -n "$DEPLOY_USER" || (echo "DEPLOY_USER secret is missing" && exit 1)
-          test -n "$DEPLOY_SSH_KEY" || (echo "DEPLOY_SSH_KEY secret is missing" && exit 1)
+          test -n "$DEPLOY_SSH_KEY$DEPLOY_PASSWORD" || (echo "Set DEPLOY_SSH_KEY or DEPLOY_PASSWORD secret" && exit 1)
 
       - name: Configure SSH
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$DEPLOY_SSH_KEY" ]; then
+            printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+            chmod 600 ~/.ssh/deploy_key
+          fi
           ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Install sshpass for password auth
+        if: env.DEPLOY_SSH_KEY == '' && env.DEPLOY_PASSWORD != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
 
       - name: Deploy over SSH
         run: |
-          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
-            "APP_DIR='$DEPLOY_PATH' BRANCH='$DEPLOY_BRANCH' bash -s" <<'REMOTE'
+          REMOTE_COMMAND="APP_DIR='$DEPLOY_PATH' BRANCH='$DEPLOY_BRANCH' bash -s"
+          SSH_TARGET="$DEPLOY_USER@$DEPLOY_HOST"
+
+          if [ -n "$DEPLOY_SSH_KEY" ]; then
+            SSH_CMD=(ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$SSH_TARGET" "$REMOTE_COMMAND")
+          else
+            export SSHPASS="$DEPLOY_PASSWORD"
+            SSH_CMD=(sshpass -e ssh -p "$DEPLOY_PORT" "$SSH_TARGET" "$REMOTE_COMMAND")
+          fi
+
+          "${SSH_CMD[@]}" <<'REMOTE'
           set -euo pipefail
 
           if [ ! -d "$APP_DIR/.git" ]; then
