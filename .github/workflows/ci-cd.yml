@@ -71,11 +71,13 @@ jobs:
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
       DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/opt/fan-raids' }}
-      DEPLOY_BRANCH: ${{ github.ref_name }}
       DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
       DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Validate deploy secrets
         run: |
           test -n "$DEPLOY_HOST" || (echo "DEPLOY_HOST secret is missing" && exit 1)
@@ -99,29 +101,61 @@ jobs:
 
       - name: Deploy over SSH
         run: |
-          REMOTE_COMMAND="APP_DIR='$DEPLOY_PATH' BRANCH='$DEPLOY_BRANCH' bash -s"
           SSH_TARGET="$DEPLOY_USER@$DEPLOY_HOST"
 
           if [ -n "$DEPLOY_SSH_KEY" ]; then
-            SSH_CMD=(ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "$SSH_TARGET" "$REMOTE_COMMAND")
+            SSH_CMD=(ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT")
+            SCP_CMD=(scp -i ~/.ssh/deploy_key -P "$DEPLOY_PORT")
           else
             export SSHPASS="$DEPLOY_PASSWORD"
-            SSH_CMD=(sshpass -e ssh -p "$DEPLOY_PORT" "$SSH_TARGET" "$REMOTE_COMMAND")
+            SSH_CMD=(sshpass -e ssh -p "$DEPLOY_PORT")
+            SCP_CMD=(sshpass -e scp -P "$DEPLOY_PORT")
           fi
 
-          "${SSH_CMD[@]}" <<'REMOTE'
+          tar \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='node_modules' \
+            --exclude='.pnpm-store' \
+            --exclude='dist' \
+            --exclude='**/dist' \
+            --exclude='*.log' \
+            --exclude='*.sqlite' \
+            --exclude='*.sqlite-*' \
+            -czf fan-raid-release.tgz .
+
+          "${SCP_CMD[@]}" fan-raid-release.tgz "$SSH_TARGET:/tmp/fan-raid-release.tgz"
+
+          "${SSH_CMD[@]}" "$SSH_TARGET" "APP_DIR='$DEPLOY_PATH' bash -s" <<'REMOTE'
           set -euo pipefail
 
-          if [ ! -d "$APP_DIR/.git" ]; then
-            echo "Repository is not cloned at $APP_DIR"
-            echo "Clone it once on the server and create $APP_DIR/.env before running deploy."
-            exit 1
-          fi
+          mkdir -p "$APP_DIR"
 
           cd "$APP_DIR"
-          git fetch --prune origin
-          git checkout "$BRANCH"
-          git reset --hard "origin/$BRANCH"
+          ENV_BACKUP="$(mktemp)"
+          HAD_ENV=0
+          if [ -f ".env" ]; then
+            cp .env "$ENV_BACKUP"
+            HAD_ENV=1
+          fi
+
+          find "$APP_DIR" -mindepth 1 -maxdepth 1 \
+            ! -name ".env" \
+            -exec rm -rf {} +
+
+          tar -xzf /tmp/fan-raid-release.tgz -C "$APP_DIR"
+          rm -f /tmp/fan-raid-release.tgz
+
+          if [ "$HAD_ENV" = "1" ]; then
+            mv "$ENV_BACKUP" .env
+          elif [ ! -f ".env" ]; then
+            rm -f "$ENV_BACKUP"
+            cp .env.example .env
+            echo "Created $APP_DIR/.env from .env.example. Edit it on the server for production secrets."
+          else
+            rm -f "$ENV_BACKUP"
+          fi
+
           chmod +x scripts/deploy-on-server.sh
           ./scripts/deploy-on-server.sh
           REMOTE

@@ -15,9 +15,10 @@ On pull requests and pushes:
 On push to `main` or `master`:
 
 1. Connects to the server over SSH.
-2. Updates the repo in `DEPLOY_PATH`.
-3. Runs `scripts/deploy-on-server.sh`.
-4. Rebuilds and restarts Docker Compose services.
+2. Uploads the current repository snapshot as a tar archive.
+3. Extracts it into `DEPLOY_PATH`, preserving the server `.env`.
+4. Runs `scripts/deploy-on-server.sh`.
+5. Rebuilds and restarts Docker Compose services.
 
 ## GitHub Secrets
 
@@ -44,11 +45,11 @@ Optional:
 
 ## One-Time Server Setup
 
-Install Docker, Docker Compose plugin, and Git on the server.
+Install Docker and the Docker Compose plugin on the server.
 
 ```bash
 sudo apt update
-sudo apt install -y ca-certificates curl git
+sudo apt install -y ca-certificates curl
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo tee /etc/apt/keyrings/docker.asc >/dev/null
 sudo chmod a+r /etc/apt/keyrings/docker.asc
@@ -64,21 +65,22 @@ sudo adduser deploy
 sudo usermod -aG docker deploy
 ```
 
-Log in as `deploy`, clone the repo once, and create the production `.env`:
+Create the app directory and give the deploy user write access:
 
 ```bash
 sudo mkdir -p /opt/fan-raids
 sudo chown deploy:deploy /opt/fan-raids
-git clone git@github.com:YOUR_ORG/YOUR_REPO.git /opt/fan-raids
-cd /opt/fan-raids
-cp .env.example .env
-nano .env
-docker compose up -d --build
 ```
 
-If the repository is private, add an SSH deploy key for the server in GitHub:
+You do not need to clone the repository on the server. GitHub Actions uploads the current code snapshot on every deploy.
 
-`Settings` → `Deploy keys` → `Add deploy key`
+On the first successful deploy, if `/opt/fan-raids/.env` does not exist, the workflow creates it from `.env.example`. After that, edit it on the server:
+
+```bash
+nano /opt/fan-raids/.env
+```
+
+Future deploys preserve `/opt/fan-raids/.env`.
 
 ## Password Login
 
@@ -106,6 +108,5 @@ Manual server command if needed:
 
 ```bash
 cd /opt/fan-raids
-git pull
 ./scripts/deploy-on-server.sh
 ```
