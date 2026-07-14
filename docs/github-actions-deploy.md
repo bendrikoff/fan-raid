@@ -126,6 +126,21 @@ docker compose logs -f caddy
 
 Open the app as `https://fanraid.example.com`, not `http://SERVER_IP:5173`.
 
+If the site does not respond from the VPS itself, first verify that Caddy publishes ports:
+
+```bash
+docker compose ps
+curl -I http://127.0.0.1
+```
+
+The `caddy` row must show `0.0.0.0:80->80/tcp` and `0.0.0.0:443->443/tcp`. If it does not, recreate the service:
+
+```bash
+docker compose up -d --force-recreate caddy
+```
+
+If Caddy logs contain DNS errors for `acme-v02.api.letsencrypt.org`, the compose file sets public DNS servers for the Caddy container. Redeploy or recreate Caddy after pulling the latest code.
+
 ## Password Login
 
 If your server uses password SSH login, add `DEPLOY_PASSWORD` as a GitHub Actions secret.
