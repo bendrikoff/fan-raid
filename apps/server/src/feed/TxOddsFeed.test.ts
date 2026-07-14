@@ -134,4 +134,43 @@ describe('TxOddsFeed normalizer', () => {
       { matchId: 'm1', ts: 1_800_000_000_000, minute: 54, type: 'goal', team: 'away' },
     ]);
   });
+
+  it('maps TxLINE soccer score snapshots into normalized score state', () => {
+    const res = normalizeTxOddsMessage(
+      {
+        fixtureId: 17952170,
+        ts: 1_800_000_000,
+        participant1IsHome: true,
+        dataSoccer: {
+          New: {
+            Minutes: 34,
+            Scores: [0, 1],
+          },
+        },
+      },
+      { matchId: 'm1', fallbackMinute: 0, externalMatchId: '17952170' },
+    );
+
+    expect(res.scoreSnapshots).toEqual([
+      { matchId: 'm1', ts: 1_800_000_000_000, minute: 34, score: { home: 0, away: 1 } },
+    ]);
+  });
+
+  it('flips TxLINE score snapshots when participant 1 is away', () => {
+    const res = normalizeTxOddsMessage(
+      {
+        fixtureId: 17952170,
+        participant1IsHome: false,
+        dataSoccer: {
+          New: {
+            Minutes: 30,
+            Scores: [1, 0],
+          },
+        },
+      },
+      { matchId: 'm1', fallbackMinute: 0, externalMatchId: '17952170' },
+    );
+
+    expect(res.scoreSnapshots[0]?.score).toEqual({ home: 0, away: 1 });
+  });
 });

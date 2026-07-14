@@ -71,6 +71,14 @@ async function main(): Promise<void> {
     console.log(`- ${fixture.id}: ${fixture.label}`);
   }
 
+  const fixtureId = env.TXODDS_MATCH_ID || fixtures.map(fixtureIdOf).find(Boolean);
+  if (fixtureId) {
+    console.log('');
+    console.log(`[txline:check] probing streams for fixtureId=${fixtureId}`);
+    await probeStream('odds', effectiveOddsUrl.replaceAll('{matchId}', encodeURIComponent(fixtureId)), bearerToken, apiKey);
+    await probeStream('scores', effectiveScoresUrl.replaceAll('{matchId}', encodeURIComponent(fixtureId)), bearerToken, apiKey);
+  }
+
   if (!env.TXODDS_MATCH_ID && fixtures.length > 0) {
     console.log('');
     console.log('TXODDS_MATCH_ID is empty, so the backend will auto-pick a live or nearest upcoming fixture.');
@@ -89,6 +97,7 @@ async function fetchFixtures(apiOrigin: string, jwt: string, apiToken: string): 
     headers: {
       Authorization: `Bearer ${jwt}`,
       'X-Api-Token': apiToken,
+      'User-Agent': 'FanRaid/0.1',
     },
   });
 
@@ -101,14 +110,43 @@ async function fetchFixtures(apiOrigin: string, jwt: string, apiToken: string): 
   return Array.isArray(body) ? body : [];
 }
 
+async function probeStream(name: string, url: string, jwt: string, apiToken: string): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3500);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        'X-Api-Token': apiToken,
+        Accept: 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'User-Agent': 'FanRaid/0.1',
+      },
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get('content-type') ?? '<empty>';
+    if (response.ok) {
+      console.log(`OK   ${name} stream HTTP ${response.status} content-type=${contentType}`);
+      return;
+    }
+
+    const body = await response.text();
+    const hint = body.includes('cloudfront') || body.includes('CloudFront') ? ' (CloudFront blocked this request)' : '';
+    console.log(`FAIL ${name} stream HTTP ${response.status}${hint}: ${body.replace(/\s+/g, ' ').slice(0, 220)}`);
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.log(`OK   ${name} stream opened but did not send data within probe window`);
+      return;
+    }
+    console.log(`FAIL ${name} stream probe failed: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    controller.abort();
+    clearTimeout(timeout);
+  }
+}
+
 function summarizeFixture(raw: unknown): FixtureSummary {
-  const id = String(
-    getPath(raw, 'fixtureId') ??
-      getPath(raw, 'FixtureId') ??
-      getPath(raw, 'id') ??
-      getPath(raw, 'Id') ??
-      '<unknown>',
-  );
+  const id = fixtureIdOf(raw) ?? '<unknown>';
   const p1 = firstText(raw, [
     'participant1.name',
     'Participant1.Name',
@@ -129,6 +167,13 @@ function summarizeFixture(raw: unknown): FixtureSummary {
   const startsAt = firstText(raw, ['startsAt', 'StartsAt', 'startTime', 'StartTime', 'kickoff', 'Kickoff']);
   const label = [p1 && p2 ? `${p1} vs ${p2}` : undefined, competition, startsAt].filter(Boolean).join(' | ');
   return { id, label: label || JSON.stringify(raw).slice(0, 140) };
+}
+
+function fixtureIdOf(raw: unknown): string | undefined {
+  const value = getPath(raw, 'fixtureId') ?? getPath(raw, 'FixtureId') ?? getPath(raw, 'id') ?? getPath(raw, 'Id');
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return undefined;
 }
 
 function firstText(raw: unknown, paths: string[]): string | undefined {

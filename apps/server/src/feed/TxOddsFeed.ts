@@ -5,6 +5,7 @@ import {
   type MatchEventType,
   type OddsUpdate,
   type Probs,
+  type Score,
   type TeamSide,
 } from '@fan-raid/shared';
 import { BaseFeed } from './FeedSource.js';
@@ -53,6 +54,14 @@ export interface TxOddsNormalizerOptions {
 interface NormalizedTxOddsMessage {
   odds: OddsUpdate[];
   events: MatchEvent[];
+  scoreSnapshots: NormalizedScoreSnapshot[];
+}
+
+interface NormalizedScoreSnapshot {
+  matchId: string;
+  ts: number;
+  minute: number;
+  score: Score;
 }
 
 interface SseMessage {
@@ -194,6 +203,9 @@ export class TxOddsFeed extends BaseFeed {
   private emittedSecondHalf = false;
   private readonly seenEvents = new Set<string>();
   private lastOddsKey = '';
+  private lastScoreTickKey = '';
+  private lastProbs: Probs = { home: 0.4, draw: 0.26, away: 0.34 };
+  private lastScore: Score = { home: 0, away: 0 };
 
   constructor(private readonly options: TxOddsFeedOptions) {
     super();
@@ -221,6 +233,9 @@ export class TxOddsFeed extends BaseFeed {
     this.emittedSecondHalf = false;
     this.seenEvents.clear();
     this.lastOddsKey = '';
+    this.lastScoreTickKey = '';
+    this.lastProbs = { home: 0.4, draw: 0.26, away: 0.34 };
+    this.lastScore = { home: 0, away: 0 };
 
     if (mode === 'ws') this.openWebSocket();
     else if (mode === 'sse') this.openSseStreams();
@@ -339,7 +354,7 @@ export class TxOddsFeed extends BaseFeed {
   }
 
   private authHeaders(): Record<string, string> {
-    const headers: Record<string, string> = { Accept: 'application/json' };
+    const headers: Record<string, string> = { Accept: 'application/json', 'User-Agent': 'FanRaid/0.1' };
     if (this.options.bearerToken.trim()) headers.Authorization = `Bearer ${this.options.bearerToken}`;
     const header = this.options.apiKeyHeader.trim();
     if (header) {
@@ -369,9 +384,13 @@ export class TxOddsFeed extends BaseFeed {
     for (const event of normalized.events) {
       this.emitMappedEvent(event);
     }
+    for (const snapshot of normalized.scoreSnapshots) {
+      this.emitScoreSnapshot(snapshot);
+    }
     for (const odds of normalized.odds) {
       this.ensureLivePhase(odds.minute, odds.ts);
       this.lastMinute = odds.minute;
+      this.lastProbs = odds.probs;
       const key = `${odds.minute}:${odds.probs.home.toFixed(6)}:${odds.probs.draw.toFixed(6)}:${odds.probs.away.toFixed(6)}`;
       if (key === this.lastOddsKey) continue;
       this.lastOddsKey = key;
@@ -387,7 +406,38 @@ export class TxOddsFeed extends BaseFeed {
     if (event.type === 'kickoff') this.emittedKickoff = true;
     if (event.type === 'second_half') this.emittedSecondHalf = true;
     this.lastMinute = event.minute;
+    if (event.type === 'goal' && event.team) {
+      this.lastScore = { ...this.lastScore, [event.team]: this.lastScore[event.team] + 1 };
+    }
     this.emitMatch(event);
+  }
+
+  private emitScoreSnapshot(snapshot: NormalizedScoreSnapshot): void {
+    this.ensureLivePhase(snapshot.minute, snapshot.ts);
+    this.lastMinute = snapshot.minute;
+
+    const homeGoals = Math.max(0, snapshot.score.home - this.lastScore.home);
+    const awayGoals = Math.max(0, snapshot.score.away - this.lastScore.away);
+    let offset = 0;
+    for (let i = 0; i < homeGoals; i += 1) {
+      this.emitMappedEvent({ matchId: this.internalMatchId, ts: snapshot.ts + offset, minute: snapshot.minute, type: 'goal', team: 'home' });
+      offset += 1;
+    }
+    for (let i = 0; i < awayGoals; i += 1) {
+      this.emitMappedEvent({ matchId: this.internalMatchId, ts: snapshot.ts + offset, minute: snapshot.minute, type: 'goal', team: 'away' });
+      offset += 1;
+    }
+
+    this.lastScore = snapshot.score;
+    const key = `${snapshot.minute}:${snapshot.score.home}:${snapshot.score.away}`;
+    if (key === this.lastScoreTickKey) return;
+    this.lastScoreTickKey = key;
+    this.emitOdds({
+      matchId: this.internalMatchId,
+      ts: snapshot.ts,
+      minute: snapshot.minute,
+      probs: this.lastProbs,
+    });
   }
 
   private ensureLivePhase(minute: number, ts: number): void {
@@ -407,16 +457,19 @@ export function normalizeTxOddsMessage(raw: unknown, options: TxOddsNormalizerOp
   const items = extractItems(root);
   const odds: OddsUpdate[] = [];
   const events: MatchEvent[] = [];
+  const scoreSnapshots: NormalizedScoreSnapshot[] = [];
 
   for (const item of items) {
     if (!matchesExternalFixture(item, options.externalMatchId)) continue;
     const event = mapEvent(item, options);
     if (event) events.push(event);
+    const scoreSnapshot = mapScoreSnapshot(item, options);
+    if (scoreSnapshot) scoreSnapshots.push(scoreSnapshot);
     const update = mapOdds(item, options);
     if (update) odds.push(update);
   }
 
-  return { odds, events };
+  return { odds, events, scoreSnapshots };
 }
 
 function extractItems(root: unknown): unknown[] {
@@ -475,6 +528,18 @@ function mapEvent(raw: unknown, options: TxOddsNormalizerOptions): MatchEvent | 
   };
   if (team) event.team = team;
   return event;
+}
+
+function mapScoreSnapshot(raw: unknown, options: TxOddsNormalizerOptions): NormalizedScoreSnapshot | null {
+  const score = readScore(raw);
+  if (!score) return null;
+
+  return {
+    matchId: options.matchId,
+    ts: readTs(raw, options) ?? Date.now(),
+    minute: readMinute(raw, options) ?? options.fallbackMinute,
+    score,
+  };
 }
 
 function readTxLineEventType(raw: unknown): unknown {
@@ -543,6 +608,96 @@ function readOddsValues(raw: unknown, options: TxOddsNormalizerOptions): [number
   }
 
   return readMarketValues(raw, options);
+}
+
+function readScore(raw: unknown): Score | null {
+  const directPairs: Array<[string, string]> = [
+    ['score.home', 'score.away'],
+    ['scores.home', 'scores.away'],
+    ['Score.Home', 'Score.Away'],
+    ['Scores.Home', 'Scores.Away'],
+    ['homeScore', 'awayScore'],
+    ['HomeScore', 'AwayScore'],
+    ['home.score', 'away.score'],
+    ['teams.home.score', 'teams.away.score'],
+    ['dataSoccer.New.Score.Home', 'dataSoccer.New.Score.Away'],
+    ['dataSoccer.New.Scores.Home', 'dataSoccer.New.Scores.Away'],
+    ['dataSoccer.Score.Home', 'dataSoccer.Score.Away'],
+    ['dataSoccer.Scores.Home', 'dataSoccer.Scores.Away'],
+    ['data.New.Score.Home', 'data.New.Score.Away'],
+    ['data.New.Scores.Home', 'data.New.Scores.Away'],
+    ['data.Score.Home', 'data.Score.Away'],
+    ['data.Scores.Home', 'data.Scores.Away'],
+    ['New.Score.Home', 'New.Score.Away'],
+    ['New.Scores.Home', 'New.Scores.Away'],
+  ];
+
+  for (const [homePath, awayPath] of directPairs) {
+    const home = toNumber(getPath(raw, homePath));
+    const away = toNumber(getPath(raw, awayPath));
+    if (home !== null && away !== null) return normalizeScore(home, away);
+  }
+
+  const value = firstPath(raw, [
+    'score',
+    'Score',
+    'scores',
+    'Scores',
+    'dataSoccer.New.Score',
+    'dataSoccer.New.Scores',
+    'dataSoccer.Score',
+    'dataSoccer.Scores',
+    'data.New.Score',
+    'data.New.Scores',
+    'data.Score',
+    'data.Scores',
+    'New.Score',
+    'New.Scores',
+  ]);
+  return scoreFromValue(value, participant1IsHome(raw));
+}
+
+function scoreFromValue(value: unknown, participant1IsHomeValue: boolean): Score | null {
+  if (Array.isArray(value) && value.length >= 2) {
+    const first = toNumber(value[0]);
+    const second = toNumber(value[1]);
+    if (first === null || second === null) return null;
+    return participantScoreToHomeAway(first, second, participant1IsHomeValue);
+  }
+
+  if (typeof value === 'string') {
+    const match = value.trim().match(/(\d+)\s*[:-]\s*(\d+)/);
+    if (!match) return null;
+    return normalizeScore(Number(match[1]), Number(match[2]));
+  }
+
+  if (isObject(value)) {
+    const home = toNumber(getLoose(value, ['home', 'homeScore', 'h', '1', 'participant1']));
+    const away = toNumber(getLoose(value, ['away', 'awayScore', 'a', '2', 'participant2']));
+    if (home !== null && away !== null) return normalizeScore(home, away);
+  }
+
+  return null;
+}
+
+function participantScoreToHomeAway(participant1: number, participant2: number, participant1IsHomeValue: boolean): Score {
+  return participant1IsHomeValue
+    ? normalizeScore(participant1, participant2)
+    : normalizeScore(participant2, participant1);
+}
+
+function normalizeScore(home: number, away: number): Score {
+  return {
+    home: Math.max(0, Math.floor(home)),
+    away: Math.max(0, Math.floor(away)),
+  };
+}
+
+function participant1IsHome(raw: unknown): boolean {
+  const value = firstPath(raw, ['participant1IsHome', 'Participant1IsHome', 'dataSoccer.Participant1IsHome', 'data.Participant1IsHome']);
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return normalizeKey(value) !== 'false';
+  return true;
 }
 
 function readTxLineOddsValues(raw: unknown, options: TxOddsNormalizerOptions): [number, number, number] | null {

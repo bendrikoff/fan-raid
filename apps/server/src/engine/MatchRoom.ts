@@ -137,16 +137,7 @@ export class MatchRoom {
     this.minute = u.minute;
     this.probs = u.probs;
     this.engine.onOdds(u);
-    // tick once per game minute (SimFeed emits odds every minute).
-    this.broadcaster.broadcast({
-      type: 'tick',
-      payload: {
-        minute: this.minute,
-        probs: this.probs,
-        fanPower: this.fanPower,
-        score: this.score,
-      },
-    });
+    this.broadcastTick();
     void prev;
   }
 
@@ -157,6 +148,19 @@ export class MatchRoom {
     this.engine.onMatchEvent(e, this.gameSeconds, this.minute);
     // Event for client-side effects (section 9).
     this.broadcaster.broadcast({ type: 'match_event', payload: e });
+    this.broadcastTick();
+  }
+
+  private broadcastTick(): void {
+    this.broadcaster.broadcast({
+      type: 'tick',
+      payload: {
+        minute: this.minute,
+        probs: this.probs,
+        fanPower: this.fanPower,
+        score: this.score,
+      },
+    });
   }
 
   private applyPhase(e: MatchEvent): void {
