@@ -193,6 +193,25 @@ describe('TxOddsFeed normalizer', () => {
     expect(res.scoreSnapshots).toHaveLength(1);
   });
 
+  it('maps finished TxLINE status into fulltime at 90 minutes', () => {
+    const res = normalizeTxOddsMessage(
+      {
+        fixtureId: 17952170,
+        ts: 1_800_000_000,
+        Status: 'Finished',
+        Scores: [0, 2],
+      },
+      { matchId: 'm1', fallbackMinute: 0, externalMatchId: '17952170' },
+    );
+
+    expect(res.events).toEqual([
+      { matchId: 'm1', ts: 1_800_000_000_000, minute: 90, type: 'fulltime' },
+    ]);
+    expect(res.scoreSnapshots).toEqual([
+      { matchId: 'm1', ts: 1_800_000_000_000, minute: 90, score: { home: 0, away: 2 } },
+    ]);
+  });
+
   it('does not double count repeated TxLINE goal snapshots', () => {
     const feed = new TxOddsFeed(testOptions());
     const access = feed as unknown as { internalMatchId: string; processRawMessage: (raw: unknown) => void };

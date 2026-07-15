@@ -248,6 +248,9 @@ export function LiveHome({
 }): JSX.Element {
   const startsAtMs = room.match.startsAt ? Date.parse(room.match.startsAt) : null;
   const heroCountdown = useCountdown(startsAtMs && startsAtMs > Date.now() ? startsAtMs : null);
+  const isFinished = room.phase === 'finished' || room.match.status === 'finished';
+  const isLive = !isFinished && room.match.status === 'live';
+  const statusLabel = isFinished ? 'FT' : isLive ? 'LIVE' : 'SOON';
   const predictionCountdown = useCountdown(dashboard?.prediction.closesAt ?? null);
   const prediction = dashboard?.prediction;
   const submittedOption = prediction?.selectedOptionId ?? null;
@@ -281,7 +284,7 @@ export function LiveHome({
           <div className="live-match-bg" aria-hidden="true" />
           <div className="live-match-meta">
             <div className="live-meta-left">
-              <span className="live-badge"><span className="live-green-dot" />LIVE</span>
+              <span className="live-badge"><span className="live-green-dot" />{statusLabel}</span>
               <span className="live-meta-competition">{formatCompetition(room.match.competition).toUpperCase()}</span>
               <span className="live-meta-date"><CalendarIcon />{formatDate(room.match.startsAt)}</span>
             </div>
@@ -302,9 +305,9 @@ export function LiveHome({
           </div>
 
           <div className="live-countdown-card">
-            <span>{room.match.status === 'live' ? 'Match live' : 'Match starts in'}</span>
-            {room.match.status === 'live' ? (
-              <b>{room.minute}<small>′</small></b>
+            <span>{isFinished ? 'Full time' : isLive ? 'Match live' : 'Match starts in'}</span>
+            {isFinished || isLive ? (
+              <b>{isFinished ? Math.max(room.minute, 90) : room.minute}<small>′</small></b>
             ) : (
               <b>{heroCountdown.hours} : {heroCountdown.minutes} : {heroCountdown.seconds}</b>
             )}

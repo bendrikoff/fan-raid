@@ -123,7 +123,7 @@ export function selectTxLineFixture(rawFixtures: unknown[], preferredFixtureId: 
   const upcoming = fixtures.filter((f) => f.status === 'upcoming').sort((a, b) => a.sortTime - b.sortTime);
   if (upcoming[0]) return upcoming[0];
 
-  return fixtures.sort((a, b) => Math.abs(a.sortTime - nowMs) - Math.abs(b.sortTime - nowMs))[0] ?? null;
+  return null;
 }
 
 export function parseTxLineFixture(raw: unknown, nowMs = Date.now()): ParsedFixture | null {

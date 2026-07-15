@@ -1,6 +1,7 @@
 import {
   CARD_FANPOWER_SHIFT,
   FAN_POWER,
+  MATCH,
   MATCH_ID,
   TEAM_NAMES,
   clamp,
@@ -60,6 +61,7 @@ export interface RoomHooks {
 }
 
 const REAL_TICK_MS = 100;
+const REAL_MATCH_MAX_DURATION_MS = 150 * 60_000;
 const DEFAULT_MATCH_INFO: MatchInfo = {
   id: MATCH_ID,
   source: 'sim',
@@ -125,9 +127,24 @@ export class MatchRoom {
 
   private realTick(): void {
     if (this.phase === 'finished') return;
+    if (this.shouldFinishRealMatchByClock()) {
+      this.onMatchEvent({
+        matchId: this.matchInfo.id,
+        ts: Date.now(),
+        minute: Math.max(this.minute, MATCH.SECOND_HALF_END_MINUTE),
+        type: 'fulltime',
+      });
+      return;
+    }
     this.gameSeconds += this.gameSecondsPerRealSecond * (REAL_TICK_MS / 1000);
     const canSchedule = this.phase === 'first_half' || this.phase === 'second_half';
     this.engine.update(this.gameSeconds, this.minute, canSchedule);
+  }
+
+  private shouldFinishRealMatchByClock(): boolean {
+    if (!this.matchInfo.isReal || !this.matchInfo.startsAt) return false;
+    const startsAt = Date.parse(this.matchInfo.startsAt);
+    return Number.isFinite(startsAt) && Date.now() >= startsAt + REAL_MATCH_MAX_DURATION_MS;
   }
 
   // --- Feed ---------------------------------------------------------------
@@ -394,9 +411,14 @@ export class MatchRoom {
 
   snapshotFor(playerId?: string): RoomStatePublic {
     const players = [...this.players.values()].map((p) => this.toPublicPlayer(p));
+    const matchStatus = this.phase === 'finished'
+      ? 'finished'
+      : this.phase === 'first_half' || this.phase === 'halftime' || this.phase === 'second_half'
+        ? 'live'
+        : this.matchInfo.status;
     const state: RoomStatePublic = {
       matchId: this.matchInfo.id,
-      match: this.matchInfo,
+      match: { ...this.matchInfo, status: matchStatus },
       phase: this.phase,
       minute: this.minute,
       score: this.score,

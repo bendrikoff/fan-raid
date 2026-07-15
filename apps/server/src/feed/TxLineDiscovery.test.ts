@@ -77,4 +77,23 @@ describe('TxLineDiscovery', () => {
 
     expect(selected?.fixtureId).toBe('10');
   });
+
+  it('does not auto-pick finished fixtures when no live or upcoming fixtures exist', () => {
+    const selected = selectTxLineFixture(
+      [
+        {
+          FixtureId: 30,
+          Participant1: 'Old',
+          Participant2: 'Match',
+          Participant1IsHome: true,
+          StartTime: '2026-07-14T19:00:00.000Z',
+          Status: 'Finished',
+        },
+      ],
+      '',
+      Date.parse('2026-07-15T08:00:00.000Z'),
+    );
+
+    expect(selected).toBeNull();
+  });
 });

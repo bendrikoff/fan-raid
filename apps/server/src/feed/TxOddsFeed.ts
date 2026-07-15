@@ -80,7 +80,7 @@ const EVENT_TYPE_ALIASES: Array<[MatchEventType, string[]]> = [
   ],
   ['halftime', ['halftime', 'half_time', 'ht', 'break', 'firsthalfended']],
   ['second_half', ['secondhalf', 'second_half', 'secondhalfstarted', '2h', 'period2', 'secondperiod']],
-  ['fulltime', ['fulltime', 'full_time', 'ft', 'finished', 'ended', 'matchend', 'match_ended', 'matchfinished']],
+  ['fulltime', ['fulltime', 'full_time', 'ft', 'finished', 'ended', 'matchend', 'match_ended', 'matchfinished', 'final', 'closed', 'complete', 'completed']],
   ['goal', ['goal', 'goalscore', 'goal_scored', 'scored']],
   ['shot_on_target', ['shotontarget', 'shot_on_target', 'sot', 'on_target', 'shotontargetattempt']],
   ['shot', ['shot', 'attempt']],
@@ -159,12 +159,25 @@ const EVENT_TYPE_PATHS = [
   'event.type',
   'event.name',
   'incident.type',
+  'status',
+  'Status',
+  'gameState',
+  'GameState',
+  'state',
+  'State',
+  'match.status',
+  'fixture.status',
   'payload.type',
   'payload.eventType',
+  'payload.status',
   'dataSoccer.Action',
   'dataSoccer.Type',
+  'dataSoccer.Status',
+  'dataSoccer.New.Status',
   'data.Action',
   'data.Type',
+  'data.Status',
+  'data.New.Status',
 ];
 
 const EVENT_TEAM_PATHS = [
@@ -381,11 +394,11 @@ export class TxOddsFeed extends BaseFeed {
       externalMatchId: this.options.matchId,
     });
 
-    for (const event of normalized.events) {
-      this.emitMappedEvent(event);
-    }
     for (const snapshot of normalized.scoreSnapshots) {
       this.emitScoreSnapshot(snapshot);
+    }
+    for (const event of normalized.events) {
+      this.emitMappedEvent(event);
     }
     for (const odds of normalized.odds) {
       this.ensureLivePhase(odds.minute, odds.ts);
@@ -536,7 +549,7 @@ function mapEvent(raw: unknown, options: TxOddsNormalizerOptions): MatchEvent | 
   const event: MatchEvent = {
     matchId: options.matchId,
     ts: readTs(raw, options) ?? Date.now(),
-    minute: readMinute(raw, options) ?? options.fallbackMinute,
+    minute: readMinute(raw, options) ?? defaultMinuteForEvent(type, options.fallbackMinute),
     type,
   };
   if (team) event.team = team;
@@ -546,11 +559,12 @@ function mapEvent(raw: unknown, options: TxOddsNormalizerOptions): MatchEvent | 
 function mapScoreSnapshot(raw: unknown, options: TxOddsNormalizerOptions): NormalizedScoreSnapshot | null {
   const score = readScore(raw);
   if (!score) return null;
+  const type = mapEventType(readTxLineEventType(raw) ?? firstPath(raw, EVENT_TYPE_PATHS));
 
   return {
     matchId: options.matchId,
     ts: readTs(raw, options) ?? Date.now(),
-    minute: readMinute(raw, options) ?? options.fallbackMinute,
+    minute: readMinute(raw, options) ?? (type ? defaultMinuteForEvent(type, options.fallbackMinute) : options.fallbackMinute),
     score,
   };
 }
@@ -563,10 +577,19 @@ function readTxLineEventType(raw: unknown): unknown {
     'Type',
     'dataSoccer.Action',
     'dataSoccer.Type',
+    'dataSoccer.Status',
     'data.Action',
     'data.Type',
+    'data.Status',
     'data.New.Action',
     'data.New.Type',
+    'data.New.Status',
+    'status',
+    'Status',
+    'gameState',
+    'GameState',
+    'state',
+    'State',
   ]);
   if (explicit !== undefined && explicit !== null && explicit !== '') return explicit;
 
@@ -583,6 +606,12 @@ function readTxLineEventType(raw: unknown): unknown {
     if (paths.some((path) => getPath(raw, path) === true)) return type;
   }
   return undefined;
+}
+
+function defaultMinuteForEvent(type: MatchEventType, fallbackMinute: number): number {
+  if (type === 'fulltime') return Math.max(fallbackMinute, MATCH.SECOND_HALF_END_MINUTE);
+  if (type === 'halftime' || type === 'second_half') return Math.max(fallbackMinute, MATCH.FIRST_HALF_END_MINUTE);
+  return fallbackMinute;
 }
 
 function participantToTeamSide(raw: unknown): TeamSide | null {
