@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeTxOddsMessage } from './TxOddsFeed.js';
+import { normalizeTxOddsMessage, TxOddsFeed, type TxOddsFeedOptions } from './TxOddsFeed.js';
 
 describe('TxOddsFeed normalizer', () => {
   it('maps direct decimal odds into normalized probabilities', () => {
@@ -173,4 +173,84 @@ describe('TxOddsFeed normalizer', () => {
 
     expect(res.scoreSnapshots[0]?.score).toEqual({ home: 0, away: 1 });
   });
+
+  it('does not emit a separate goal event when the same TxLINE item has a score snapshot', () => {
+    const res = normalizeTxOddsMessage(
+      {
+        fixtureId: 17952170,
+        ts: 1_800_000_000,
+        participant1IsHome: true,
+        dataSoccer: {
+          Action: 'Goal',
+          Participant: 2,
+          New: { Minutes: 22, Scores: [0, 1] },
+        },
+      },
+      { matchId: 'm1', fallbackMinute: 0, externalMatchId: '17952170' },
+    );
+
+    expect(res.events).toHaveLength(0);
+    expect(res.scoreSnapshots).toHaveLength(1);
+  });
+
+  it('does not double count repeated TxLINE goal snapshots', () => {
+    const feed = new TxOddsFeed(testOptions());
+    const access = feed as unknown as { internalMatchId: string; processRawMessage: (raw: unknown) => void };
+    const events: string[] = [];
+    access.internalMatchId = 'm1';
+    feed.on('match', (event) => {
+      if (event.type === 'goal') events.push(`${event.type}:${event.minute}:${event.team}`);
+      if (event.type === 'score_update') events.push(`${event.type}:${event.minute}:${event.score?.home}-${event.score?.away}`);
+    });
+
+    access.processRawMessage({
+      fixtureId: 17952170,
+      ts: 1_800_000_000,
+      participant1IsHome: true,
+      dataSoccer: { Action: 'Goal', Participant: 2, New: { Minutes: 22, Scores: [0, 1] } },
+    });
+    access.processRawMessage({
+      fixtureId: 17952170,
+      ts: 1_800_000_005,
+      participant1IsHome: true,
+      dataSoccer: { Action: 'Goal', Participant: 2, New: { Minutes: 22, Scores: [0, 1] } },
+    });
+    access.processRawMessage({
+      fixtureId: 17952170,
+      ts: 1_800_000_006,
+      participant1IsHome: true,
+      dataSoccer: { Action: 'Goal', Participant: 2, New: { Minutes: 58, Scores: [0, 2] } },
+    });
+
+    expect(events.filter((event) => event.startsWith('goal'))).toEqual(['goal:22:away', 'goal:58:away']);
+    expect(events.filter((event) => event.startsWith('score_update'))).toEqual([
+      'score_update:22:0-1',
+      'score_update:58:0-2',
+    ]);
+  });
 });
+
+function testOptions(): TxOddsFeedOptions {
+  return {
+    apiUrl: 'https://example.com/odds',
+    scoresApiUrl: '',
+    apiKey: 'key',
+    bearerToken: 'jwt',
+    mode: 'sse',
+    pollMs: 1000,
+    matchId: '17952170',
+    apiKeyHeader: 'X-Api-Token',
+    apiKeyPrefix: '',
+    subscribeMessage: '',
+    payloadPath: '',
+    minutePath: '',
+    tsPath: '',
+    oddsHomePath: '',
+    oddsDrawPath: '',
+    oddsAwayPath: '',
+    eventTypePath: '',
+    eventTeamPath: '',
+    homeTeamName: 'France',
+    awayTeamName: 'Spain',
+  };
+}

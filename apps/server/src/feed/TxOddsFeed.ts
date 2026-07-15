@@ -399,7 +399,9 @@ export class TxOddsFeed extends BaseFeed {
   }
 
   private emitMappedEvent(event: MatchEvent): void {
-    const key = `${event.type}:${event.minute}:${event.team ?? '-'}:${event.ts}`;
+    const key = event.type === 'score_update' && event.score
+      ? `${event.type}:${event.minute}:${event.score.home}:${event.score.away}`
+      : `${event.type}:${event.minute}:${event.team ?? '-'}`;
     if (this.seenEvents.has(key)) return;
     this.seenEvents.add(key);
 
@@ -416,8 +418,12 @@ export class TxOddsFeed extends BaseFeed {
     this.ensureLivePhase(snapshot.minute, snapshot.ts);
     this.lastMinute = snapshot.minute;
 
-    const homeGoals = Math.max(0, snapshot.score.home - this.lastScore.home);
-    const awayGoals = Math.max(0, snapshot.score.away - this.lastScore.away);
+    const effectiveScore = {
+      home: Math.max(this.lastScore.home, snapshot.score.home),
+      away: Math.max(this.lastScore.away, snapshot.score.away),
+    };
+    const homeGoals = Math.max(0, effectiveScore.home - this.lastScore.home);
+    const awayGoals = Math.max(0, effectiveScore.away - this.lastScore.away);
     let offset = 0;
     for (let i = 0; i < homeGoals; i += 1) {
       this.emitMappedEvent({ matchId: this.internalMatchId, ts: snapshot.ts + offset, minute: snapshot.minute, type: 'goal', team: 'home' });
@@ -428,10 +434,17 @@ export class TxOddsFeed extends BaseFeed {
       offset += 1;
     }
 
-    this.lastScore = snapshot.score;
-    const key = `${snapshot.minute}:${snapshot.score.home}:${snapshot.score.away}`;
+    this.lastScore = effectiveScore;
+    const key = `${snapshot.minute}:${effectiveScore.home}:${effectiveScore.away}`;
     if (key === this.lastScoreTickKey) return;
     this.lastScoreTickKey = key;
+    this.emitMappedEvent({
+      matchId: this.internalMatchId,
+      ts: snapshot.ts,
+      minute: snapshot.minute,
+      type: 'score_update',
+      score: effectiveScore,
+    });
     this.emitOdds({
       matchId: this.internalMatchId,
       ts: snapshot.ts,
@@ -461,9 +474,9 @@ export function normalizeTxOddsMessage(raw: unknown, options: TxOddsNormalizerOp
 
   for (const item of items) {
     if (!matchesExternalFixture(item, options.externalMatchId)) continue;
-    const event = mapEvent(item, options);
-    if (event) events.push(event);
     const scoreSnapshot = mapScoreSnapshot(item, options);
+    const event = mapEvent(item, options);
+    if (event && !(event.type === 'goal' && scoreSnapshot)) events.push(event);
     if (scoreSnapshot) scoreSnapshots.push(scoreSnapshot);
     const update = mapOdds(item, options);
     if (update) odds.push(update);

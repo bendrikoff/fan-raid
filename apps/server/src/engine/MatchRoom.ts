@@ -192,6 +192,10 @@ export class MatchRoom {
   }
 
   private applyEventSideEffects(e: MatchEvent): void {
+    if (e.type === 'score_update' && e.score) {
+      this.score = e.score;
+      return;
+    }
     if (e.type === 'goal' && e.team) {
       this.score[e.team] += 1;
     }

@@ -29,6 +29,7 @@ export type MatchEventType =
   | 'yellow_card'
   | 'red_card'
   | 'goal'
+  | 'score_update'
   | 'halftime'
   | 'second_half'
   | 'fulltime';
@@ -39,6 +40,7 @@ export interface MatchEvent {
   minute: number;
   type: MatchEventType;
   team?: TeamSide; // absent for kickoff/halftime/fulltime
+  score?: Score; // present for score_update snapshots from external feeds
 }
 
 export interface MatchInfo {
