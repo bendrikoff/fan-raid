@@ -45,6 +45,8 @@ interface InternalPlayer {
   answers: AnswerRecord[];
 }
 
+type RealClockPhase = Extract<MatchPhase, 'first_half' | 'halftime' | 'second_half'>;
+
 // External room dependencies (implemented by the WS layer and persist/solana).
 export interface RoomBroadcaster {
   broadcast(msg: ServerMessage): void;
@@ -61,6 +63,7 @@ export interface RoomHooks {
 }
 
 const REAL_TICK_MS = 100;
+const REAL_HALFTIME_DURATION_MINUTES = 15;
 const REAL_MATCH_MAX_DURATION_MS = 150 * 60_000;
 const DEFAULT_MATCH_INFO: MatchInfo = {
   id: MATCH_ID,
@@ -127,6 +130,7 @@ export class MatchRoom {
 
   private realTick(): void {
     if (this.phase === 'finished') return;
+    this.syncRealMatchClock();
     if (this.shouldFinishRealMatchByClock()) {
       this.onMatchEvent({
         matchId: this.matchInfo.id,
@@ -141,6 +145,88 @@ export class MatchRoom {
     this.engine.update(this.gameSeconds, this.minute, canSchedule);
   }
 
+  private syncRealMatchClock(): void {
+    const clock = this.inferRealMatchClock();
+    if (!clock) return;
+
+    if (this.phase === 'lobby') {
+      this.onMatchEvent({
+        matchId: this.matchInfo.id,
+        ts: Date.now(),
+        minute: 0,
+        type: 'kickoff',
+      });
+    }
+
+    if (clock.phase === 'halftime' && this.phase === 'first_half') {
+      this.onMatchEvent({
+        matchId: this.matchInfo.id,
+        ts: Date.now(),
+        minute: MATCH.FIRST_HALF_END_MINUTE,
+        type: 'halftime',
+      });
+    }
+
+    if (clock.phase === 'second_half' && this.phase !== 'second_half') {
+      if (this.phase === 'first_half') {
+        this.onMatchEvent({
+          matchId: this.matchInfo.id,
+          ts: Date.now(),
+          minute: MATCH.FIRST_HALF_END_MINUTE,
+          type: 'halftime',
+        });
+      }
+      if (this.phase === 'halftime') {
+        this.onMatchEvent({
+          matchId: this.matchInfo.id,
+          ts: Date.now(),
+          minute: MATCH.FIRST_HALF_END_MINUTE,
+          type: 'second_half',
+        });
+      }
+    }
+
+    this.advanceMinute(clock.minute);
+  }
+
+  private inferRealMatchClock(): { minute: number; phase: RealClockPhase } | null {
+    if (!this.matchInfo.isReal || !this.matchInfo.startsAt) return null;
+    const startsAt = Date.parse(this.matchInfo.startsAt);
+    if (!Number.isFinite(startsAt)) return null;
+
+    const elapsedMs = Date.now() - startsAt;
+    if (elapsedMs < 0) return null;
+    const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+
+    if (elapsedMinutes <= MATCH.FIRST_HALF_END_MINUTE) {
+      return { minute: elapsedMinutes, phase: 'first_half' };
+    }
+
+    const secondHalfElapsed = elapsedMinutes
+      - MATCH.FIRST_HALF_END_MINUTE
+      - REAL_HALFTIME_DURATION_MINUTES;
+    if (secondHalfElapsed < 0) {
+      return { minute: MATCH.FIRST_HALF_END_MINUTE, phase: 'halftime' };
+    }
+
+    return {
+      minute: clamp(
+        MATCH.FIRST_HALF_END_MINUTE,
+        MATCH.SECOND_HALF_END_MINUTE,
+        MATCH.FIRST_HALF_END_MINUTE + secondHalfElapsed,
+      ),
+      phase: 'second_half',
+    };
+  }
+
+  private advanceMinute(nextMinute: number): boolean {
+    const normalized = Math.max(0, Math.floor(nextMinute));
+    if (normalized <= this.minute) return false;
+    this.minute = normalized;
+    this.broadcastTick();
+    return true;
+  }
+
   private shouldFinishRealMatchByClock(): boolean {
     if (!this.matchInfo.isReal || !this.matchInfo.startsAt) return false;
     const startsAt = Date.parse(this.matchInfo.startsAt);
@@ -151,20 +237,29 @@ export class MatchRoom {
 
   private onOdds(u: OddsUpdate): void {
     const prev = this.probs;
-    this.minute = u.minute;
+    const odds = { ...u, minute: Math.max(this.minute, u.minute) };
+    this.minute = odds.minute;
     this.probs = u.probs;
-    this.engine.onOdds(u);
+    this.engine.onOdds(odds);
     this.broadcastTick();
     void prev;
   }
 
   private onMatchEvent(e: MatchEvent): void {
-    this.minute = e.minute;
-    this.applyPhase(e);
-    this.applyEventSideEffects(e);
-    this.engine.onMatchEvent(e, this.gameSeconds, this.minute);
+    const event = {
+      ...e,
+      minute: Math.max(
+        this.minute,
+        e.minute,
+        e.type === 'fulltime' ? MATCH.SECOND_HALF_END_MINUTE : 0,
+      ),
+    };
+    this.minute = event.minute;
+    this.applyPhase(event);
+    this.applyEventSideEffects(event);
+    this.engine.onMatchEvent(event, this.gameSeconds, this.minute);
     // Event for client-side effects (section 9).
-    this.broadcaster.broadcast({ type: 'match_event', payload: e });
+    this.broadcaster.broadcast({ type: 'match_event', payload: event });
     this.broadcastTick();
   }
 
