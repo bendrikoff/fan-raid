@@ -24,7 +24,7 @@ import type { AppConfig } from '../config.js';
 import type { Db } from '../persist/db.js';
 import { signToken, verifyToken } from './token.js';
 import { telegramDisplayName, validateInitData } from './telegram.js';
-import { createWalletChallenge, verifyWalletChallenge } from './walletAuth.js';
+import { canonicalWalletAddress, createWalletChallenge, verifyWalletChallenge } from './walletAuth.js';
 import { coinTopupOption, getCoinTopupConfig, verifySolTopup } from './coinTopup.js';
 import { listTxLineFixtures } from '../feed/TxLineDiscovery.js';
 
@@ -86,6 +86,14 @@ export function registerRoutes(app: FastifyInstance, deps: RoutesDeps): void {
       ...account,
       authMethod: account.walletAddress ? 'wallet' : session.playerId.startsWith('tg:') ? 'telegram' : 'dev',
     };
+  }
+
+  function normalizeOptionalWallet(input: string): string | null {
+    try {
+      return input.trim() ? canonicalWalletAddress(input) : null;
+    } catch {
+      return null;
+    }
   }
 
   app.post('/api/auth/telegram', async (req, reply) => {
@@ -282,14 +290,18 @@ export function registerRoutes(app: FastifyInstance, deps: RoutesDeps): void {
   app.post('/api/account/coins/topup/verify', async (req, reply) => {
     const account = authAccount(req);
     if (!account) return reply.status(401).send({ error: 'unauthorized' });
-    if (!account.walletAddress) return reply.status(400).send({ error: 'wallet account required' });
 
-    const body = req.body as { packageId?: string; signature?: string } | undefined;
+    const body = req.body as { packageId?: string; signature?: string; payerWallet?: string } | undefined;
     const packageId = body?.packageId ?? '';
     const signature = (body?.signature ?? '').trim();
+    const payerWallet = normalizeOptionalWallet(account.walletAddress ?? body?.payerWallet ?? '');
     const option = coinTopupOption(packageId);
     if (!option) return reply.status(400).send({ error: 'invalid topup package' });
     if (!signature) return reply.status(400).send({ error: 'missing signature' });
+    if (!payerWallet) return reply.status(400).send({ error: 'payer wallet required' });
+    if (account.walletAddress && payerWallet !== account.walletAddress) {
+      return reply.status(400).send({ error: 'wallet mismatch' });
+    }
 
     let topupConfig;
     try {
@@ -301,7 +313,7 @@ export function registerRoutes(app: FastifyInstance, deps: RoutesDeps): void {
     const verified = await verifySolTopup({
       rpcUrl: topupConfig.rpcUrl,
       signature,
-      payerWallet: account.walletAddress,
+      payerWallet,
       treasuryWallet: topupConfig.treasuryWallet,
       lamports: option.lamports,
     });
@@ -310,7 +322,7 @@ export function registerRoutes(app: FastifyInstance, deps: RoutesDeps): void {
     const updated = db.recordCoinTopup({
       signature,
       playerId: account.playerId,
-      walletAddress: account.walletAddress,
+      walletAddress: payerWallet,
       packageId: option.id,
       lamports: option.lamports,
       coins: option.coins,

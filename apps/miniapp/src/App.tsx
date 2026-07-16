@@ -360,12 +360,8 @@ function Game(): JSX.Element {
   }
 
   async function topupCoins(packageId: string): Promise<void> {
-    let current = requireAuth();
+    const current = requireAuth();
     if (!current) return;
-    if (!current?.walletAddress) {
-      current = await connectWallet();
-      if (!current?.walletAddress) return;
-    }
 
     setTopupBusyId(packageId);
     try {

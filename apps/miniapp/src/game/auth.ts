@@ -218,7 +218,7 @@ export async function payAndVerifyCoinTopup(
   const option = config.options.find((item) => item.id === packageId);
   if (!option) throw new Error('topup_package_not_found');
 
-  const signature = await sendSolTransfer({
+  const transfer = await sendSolTransfer({
     rpcUrl: config.rpcUrl,
     treasuryWallet: config.treasuryWallet,
     lamports: option.lamports,
@@ -227,7 +227,7 @@ export async function payAndVerifyCoinTopup(
   return authorizedJson<AccountProfile & { creditedCoins: number; signature: string; slot: number }>(
     '/api/account/coins/topup/verify',
     token,
-    { packageId, signature },
+    { packageId, signature: transfer.signature, payerWallet: transfer.walletAddress },
   );
 }
 
@@ -270,7 +270,7 @@ async function sendSolTransfer(args: {
   rpcUrl: string;
   treasuryWallet: string;
   lamports: number;
-}): Promise<string> {
+}): Promise<{ signature: string; walletAddress: string }> {
   const provider = walletProvider();
   if (!provider && requiresHttpsForWallet()) throw new Error('wallet_requires_https');
   if (!provider) throw new Error('wallet_not_found');
@@ -308,5 +308,5 @@ async function sendSolTransfer(args: {
     preflightCommitment: 'confirmed',
   });
   await connection.confirmTransaction({ ...latest, signature }, 'confirmed');
-  return signature;
+  return { signature, walletAddress };
 }

@@ -156,7 +156,7 @@ export function Shop({
 
   function buyCoins(): void {
     const firstTopup = topupOptions[0];
-    if (walletAddress && firstTopup) {
+    if (firstTopup) {
       void onTopupCoins(firstTopup.id);
       return;
     }
@@ -222,7 +222,7 @@ export function Shop({
             <b>{coins.toLocaleString('en-US')}</b>
           </div>
           <button disabled={Boolean(topupBusyId) || isOpening} onClick={buyCoins}>
-            {walletAddress ? 'Buy coins' : 'Connect wallet'}
+            {walletAddress || topupOptions.length > 0 ? 'Buy coins' : 'Connect wallet'}
           </button>
         </section>
 
